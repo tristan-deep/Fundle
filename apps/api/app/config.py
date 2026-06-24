@@ -6,7 +6,6 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+pysqlite:///./fundle.db"
     cors_origins: str = "http://localhost:3000"
-    demo_mode: bool = False
     debug_fresh_session: bool = False
 
     @property
