@@ -53,6 +53,5 @@ def health() -> dict[str, str | bool]:
     cfg = get_settings()
     return {
         "status": "ok",
-        "demo_mode": cfg.demo_mode,
         "debug_fresh_session": cfg.debug_fresh_session,
     }

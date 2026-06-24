@@ -9,41 +9,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import DailyPuzzle, GameSession
 from app.services.funda_url import funda_listing_url
 from app.services.hints import listing_to_payload
 
 # Funda search results only include ~5 thumbnail ids; detail has the full gallery.
 SEARCH_THUMB_PHOTO_LIMIT = 6
-
-DEMO_LISTING_ID = 7762080
-
-DEMO_PAYLOAD: dict[str, Any] = {
-    "global_id": DEMO_LISTING_ID,
-    "tiny_id": "43117443",
-    "url": None,
-    "offering_type": "buy",
-    "object_type": "apartment",
-    "construction_type": "existing",
-    "city": "Luttenberg",
-    "province": "Overijssel",
-    "municipality": "Raalte",
-    "neighbourhood": "Luttenberg",
-    "living_area": 85,
-    "plot_area": None,
-    "energy_label": "B",
-    "bedrooms": 3,
-    "rooms_count": 4,
-    "construction_year": 1998,
-    "house_type": "Bovenwoning",
-    "photo_url": None,
-    "photo_urls": [],
-    "feature_flags": ["garden"],
-    "highlight": None,
-}
-
-DEMO_ANSWER = 695_000
 
 
 def _listing_construction_type(listing: Any) -> str | None:
@@ -226,13 +197,6 @@ def _enrich_payload_from_funda(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
 
 
-def build_demo_puzzle(puzzle_date: date) -> tuple[int, int, dict]:
-    base = dict(DEMO_PAYLOAD)
-    payload = _enrich_payload_from_funda(base)
-    global_id = payload.get("global_id") or DEMO_LISTING_ID
-    return global_id, DEMO_ANSWER, payload
-
-
 def build_live_puzzle(puzzle_date: date) -> tuple[int, int, dict]:
     listing = fetch_random_listing()
     amount = listing.price.amount
@@ -268,10 +232,7 @@ def ensure_puzzle_for_date(
     if force and existing:
         _clear_sessions_for_date(db, puzzle_date)
 
-    if settings.demo_mode:
-        global_id, answer, payload = build_demo_puzzle(puzzle_date)
-    else:
-        global_id, answer, payload = build_live_puzzle(puzzle_date)
+    global_id, answer, payload = build_live_puzzle(puzzle_date)
 
     if existing:
         existing.global_id = global_id

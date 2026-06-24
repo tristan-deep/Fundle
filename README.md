@@ -37,7 +37,7 @@ Run once from the project root:
 
 That creates the API venv, installs Python and npm dependencies, copies `fundle.config.env.example` → `fundle.config.env` (if needed), and syncs env files. Then use `npm run dev` for daily development.
 
-Local settings live in `fundle.config.env` (gitignored). The committed `fundle.config.env.example` has safe defaults (`DEMO_MODE=1`).
+Local settings live in `fundle.config.env` (gitignored). Copy from `fundle.config.env.example` if needed.
 
 <details>
 <summary>Manual setup (if you prefer)</summary>
@@ -68,9 +68,9 @@ From the project root: `npm install` (for `concurrently`). Daily dev: `npm run d
 
 Local database file: `apps/api/fundle.db` (SQLite, created on first run).
 
-### Daily puzzle (live mode)
+### Daily puzzle
 
-With `DEMO_MODE=0`, refresh today's puzzle from Funda:
+Refresh today's puzzle from Funda:
 
 ```powershell
 cd apps\api
