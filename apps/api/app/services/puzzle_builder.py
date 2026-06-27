@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import random
+import sys
 from datetime import date
+from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import DailyPuzzle, GameSession
 from app.services.funda_url import funda_listing_url
 from app.services.hints import listing_to_payload
+
+logger = logging.getLogger(__name__)
+
+# Ensure .env is loaded so os.getenv() works for PRICE_BUCKETS
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 # Funda search results only include ~5 thumbnail ids; detail has the full gallery.
 SEARCH_THUMB_PHOTO_LIMIT = 6
@@ -50,17 +60,88 @@ def _is_valid_buy_listing(listing: Any, *, strict_existing: bool = False) -> boo
     return True
 
 
-# Weighted price tiers — skew toward mid/high prices (more fun to guess).
-_PRICE_BUCKETS: list[tuple[int, int | None, float]] = [
-    (100_000, 450_000, 0.15),  # <450k
-    (450_000, 650_000, 0.25),
-    (650_000, 950_000, 0.30),
-    (950_000, None, 0.30),
-]
 _MAX_SEARCH_PAGE = 800
 _PAGE_ATTEMPTS = 8
 _DETAIL_PICK_LIMIT = 20
 _SEARCH_SORT = "newest"
+
+# Default price buckets. Format: min:max:weight (semicolon-separated).
+# Max can be empty for uncapped. Weights must sum to 1.0.
+# Weights: 20% 150k–400k, 30% 400k–600k, 30% 600k–900k, 15% 900k–1.4M, 5% >1.4M
+_DEFAULT_PRICE_BUCKETS = "150000:400000:0.20;400000:600000:0.30;600000:900000:0.30;900000:1400000:0.15;1400000::0.05"
+
+
+def _parse_price_buckets() -> list[tuple[int, int | None, float]]:
+    """Parse PRICE_BUCKETS env var. Format: min:max:weight (semicolon-separated).
+    Max can be empty for uncapped. Returns [(min, max, weight), ...].
+    Normalizes weights if they don't sum to 1.0 and logs a warning.
+    """
+    config = os.getenv("PRICE_BUCKETS", _DEFAULT_PRICE_BUCKETS)
+
+    buckets = []
+    total_weight = 0.0
+    for segment in config.split(";"):
+        parts = segment.split(":")
+        if len(parts) != 3:
+            msg = f"❌ Invalid PRICE_BUCKETS format: {segment}"
+            logger.error(msg)
+            print(msg, file=sys.stderr, flush=True)
+            continue
+        try:
+            min_price = int(parts[0])
+            max_price = int(parts[1]) if parts[1] else None
+            weight = float(parts[2])
+        except ValueError as e:
+            msg = f"❌ Invalid PRICE_BUCKETS values: {segment} ({e})"
+            logger.error(msg)
+            print(msg, file=sys.stderr, flush=True)
+            continue
+        if weight < 0:
+            msg = f"❌ PRICE_BUCKETS weight must be >= 0: {segment}"
+            logger.error(msg)
+            print(msg, file=sys.stderr, flush=True)
+            continue
+        if max_price is not None and min_price >= max_price:
+            msg = f"❌ PRICE_BUCKETS: min_price must be < max_price: {segment}"
+            logger.error(msg)
+            print(msg, file=sys.stderr, flush=True)
+            continue
+        buckets.append((min_price, max_price, weight))
+        total_weight += weight
+
+    if not buckets:
+        msg = "❌ No valid PRICE_BUCKETS defined, using defaults"
+        logger.error(msg)
+        print(msg, file=sys.stderr, flush=True)
+        return _parse_price_buckets_from_string(_DEFAULT_PRICE_BUCKETS)
+
+    if abs(total_weight - 1.0) > 0.001:
+        msg = (
+            f"⚠️  PRICE_BUCKETS weights sum to {total_weight:.3f}, not 1.0. "
+            "Normalizing. Check fundle.config.env PRICE_BUCKETS."
+        )
+        logger.warning(msg)
+        print(msg, file=sys.stderr, flush=True)
+        buckets = [(lo, hi, w / total_weight) for lo, hi, w in buckets]
+
+    return buckets
+
+
+def _parse_price_buckets_from_string(
+    config: str,
+) -> list[tuple[int, int | None, float]]:
+    """Helper to parse bucket string without weight normalization (for defaults)."""
+    buckets = []
+    for segment in config.split(";"):
+        parts = segment.split(":")
+        min_price = int(parts[0])
+        max_price = int(parts[1]) if parts[1] else None
+        weight = float(parts[2])
+        buckets.append((min_price, max_price, weight))
+    return buckets
+
+
+_PRICE_BUCKETS = _parse_price_buckets()
 
 
 def _pick_price_bucket() -> tuple[int, int | None]:
@@ -89,7 +170,14 @@ def _search_candidates(
     return [r for r in results if _is_valid_buy_listing(r)]
 
 
-def _pick_listing_detail(client: Any, candidates: list[Any]) -> Any | None:
+def _pick_listing_detail(
+    client: Any,
+    candidates: list[Any],
+    *,
+    min_price: int,
+    max_price: int | None,
+) -> Any | None:
+    """Fetch and validate listing detail, ensuring price is within range."""
     shuffled = list(candidates)
     random.shuffle(shuffled)
     for pick in shuffled[: min(_DETAIL_PICK_LIMIT, len(shuffled))]:
@@ -97,8 +185,14 @@ def _pick_listing_detail(client: Any, candidates: list[Any]) -> Any | None:
             detail = client.listing(pick.global_id or pick.id)
         except Exception:
             continue
-        if _is_valid_buy_listing(detail, strict_existing=True) and detail.price.amount:
-            return detail
+        if not _is_valid_buy_listing(detail, strict_existing=True):
+            continue
+        amount = detail.price.amount
+        if not amount:
+            continue
+        if amount < min_price or (max_price is not None and amount > max_price):
+            continue
+        return detail
     return None
 
 
@@ -127,19 +221,30 @@ def fetch_random_listing() -> Any:
     from funda import Funda
 
     primary = _pick_price_bucket()
+
     fallbacks = [(lo, hi) for lo, hi, _ in _PRICE_BUCKETS if (lo, hi) != primary]
     random.shuffle(fallbacks)
 
     with Funda() as client:
-        for min_price, max_price in (primary, *fallbacks):
+        for i, (min_price, max_price) in enumerate((primary, *fallbacks)):
             for _ in range(_PAGE_ATTEMPTS):
                 candidates = _candidates_from_random_page(
                     client, min_price=min_price, max_price=max_price
                 )
                 if not candidates:
                     continue
-                detail = _pick_listing_detail(client, candidates)
+                detail = _pick_listing_detail(
+                    client, candidates, min_price=min_price, max_price=max_price
+                )
                 if detail is not None:
+                    if i > 0:
+                        max_price_str = f"€{max_price:,}" if max_price else "∞"
+                        msg = (
+                            f"⚠️  No listings in primary bucket, fell back to "
+                            f"€{min_price:,}–{max_price_str}. Consider adjusting PRICE_BUCKETS."
+                        )
+                        logger.warning(msg)
+                        print(msg, file=sys.stderr, flush=True)
                     return detail
 
         for _ in range(_PAGE_ATTEMPTS):
@@ -149,7 +254,9 @@ def fetch_random_listing() -> Any:
             )
             if not candidates:
                 continue
-            detail = _pick_listing_detail(client, candidates)
+            detail = _pick_listing_detail(
+                client, candidates, min_price=100_000, max_price=None
+            )
             if detail is not None:
                 return detail
 
@@ -202,6 +309,8 @@ def build_live_puzzle(puzzle_date: date) -> tuple[int, int, dict]:
     amount = listing.price.amount
     if amount is None:
         raise RuntimeError("Listing has no price")
+    city = listing.city or "Unknown"
+    print(f"\033[92m✓ Puzzle: €{amount:,} ({city})\033[0m", file=sys.stderr, flush=True)
     return listing.global_id or int(listing.id), amount, listing_to_payload(listing)
 
 
