@@ -239,7 +239,7 @@ def _pick_listing_detail(
         amount = detail.price.amount
         if not amount:
             continue
-        if amount < min_price or (max_price is not None and amount > max_price):
+        if amount < min_price or (max_price is not None and amount >= max_price):
             continue
         return detail
     return None
