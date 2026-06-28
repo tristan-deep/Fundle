@@ -1,4 +1,4 @@
-name: Test API
+name: Test
 
 on:
   push:
@@ -8,12 +8,9 @@ on:
       - ".github/workflows/test.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/api/**"
-      - ".github/workflows/test.yml"
 
 jobs:
-  test:
+  api:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,3 +40,23 @@ jobs:
         run: |
           cd apps/api
           uv run pytest tests/ -v
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          cd apps/web
+          npm install
+
+      - name: Run engine tests
+        run: |
+          cd apps/web
+          npm test

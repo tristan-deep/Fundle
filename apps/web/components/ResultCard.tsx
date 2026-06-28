@@ -1,4 +1,5 @@
 import type { GameResult, PuzzleState } from "@/lib/types";
+import { CommunityStats } from "./CommunityStats";
 import { CopyResultButton } from "./CopyResultButton";
 import { ShareButton } from "./ShareButton";
 import { ExternalLink } from "lucide-react";
@@ -59,6 +60,8 @@ export function ResultCard({ result, state }: Props) {
           </a>
         )}
       </div>
+
+      <CommunityStats puzzleDate={state.puzzle_date} />
     </div>
   );
 }

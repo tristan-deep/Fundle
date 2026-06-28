@@ -17,6 +17,7 @@ venv/
 # Next.js
 apps/web/.next/
 apps/web/out/
+*.tsbuildinfo
 
 # Env & local config (never commit secrets or machine-specific settings)
 .env

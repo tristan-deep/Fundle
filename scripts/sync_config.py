@@ -11,7 +11,14 @@ CONFIG = ROOT / "fundle.config.env"
 API_ENV = ROOT / "apps" / "api" / ".env"
 WEB_ENV = ROOT / "apps" / "web" / ".env.local"
 
-REQUIRED = ("DEBUG_FRESH", "DATABASE_URL", "CORS_ORIGINS", "NEXT_PUBLIC_API_URL", "PRICE_BUCKETS")
+REQUIRED = (
+    "DEBUG_FRESH",
+    "PRICE_BUCKETS",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+)
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -43,9 +50,10 @@ def write_api_env(cfg: dict[str, str]) -> None:
         print(f"Missing keys in {CONFIG.name}: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
+    # The puzzle builder (scripts/build_daily_puzzle.py) reads these locally.
     content = f"""# Generated from fundle.config.env - do not edit by hand
-DATABASE_URL={cfg["DATABASE_URL"]}
-CORS_ORIGINS={cfg["CORS_ORIGINS"]}
+SUPABASE_URL={cfg["SUPABASE_URL"]}
+SUPABASE_SERVICE_ROLE_KEY={cfg["SUPABASE_SERVICE_ROLE_KEY"]}
 DEBUG_FRESH_SESSION={cfg["DEBUG_FRESH"]}
 PRICE_BUCKETS={cfg["PRICE_BUCKETS"]}
 """
@@ -54,7 +62,8 @@ PRICE_BUCKETS={cfg["PRICE_BUCKETS"]}
 
 def write_web_env(cfg: dict[str, str]) -> None:
     content = f"""# Generated from fundle.config.env - do not edit by hand
-NEXT_PUBLIC_API_URL={cfg["NEXT_PUBLIC_API_URL"]}
+NEXT_PUBLIC_SUPABASE_URL={cfg["NEXT_PUBLIC_SUPABASE_URL"]}
+NEXT_PUBLIC_SUPABASE_ANON_KEY={cfg["NEXT_PUBLIC_SUPABASE_ANON_KEY"]}
 NEXT_PUBLIC_DEBUG_FRESH={cfg["DEBUG_FRESH"]}
 """
     WEB_ENV.write_text(content, encoding="utf-8")

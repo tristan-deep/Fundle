@@ -5,19 +5,16 @@ export function isDebugFresh(): boolean {
   return process.env.NEXT_PUBLIC_DEBUG_FRESH === "1";
 }
 
-export function getStoredSessionId(): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  if (isDebugFresh()) return undefined;
-  return localStorage.getItem(SESSION_KEY) ?? undefined;
-}
-
-export function clearStoredSession(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(SESSION_KEY);
-}
-
-export function storeSessionId(id: string): void {
-  localStorage.setItem(SESSION_KEY, id);
+// Stable per-browser id. No longer a server session — just a local identifier
+// kept for the PuzzleState shape and potential future use.
+export function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return "ssr";
+  let id = localStorage.getItem(SESSION_KEY);
+  if (!id) {
+    id = (crypto.randomUUID?.() ?? `s-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    localStorage.setItem(SESSION_KEY, id);
+  }
+  return id;
 }
 
 export function hasSeenHelp(): boolean {

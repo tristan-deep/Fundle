@@ -11,19 +11,24 @@
 
 ## Stack
 
-- **Frontend:** Next.js (`apps/web`)
-- **Backend:** FastAPI + pyfunda (`apps/api`)
-- **Database:** SQLite (local dev), PostgreSQL (production via Neon)
+- **Frontend:** Next.js, static on Vercel (`apps/web`) — gameplay runs entirely in the browser
+- **Puzzle builder:** Python + pyfunda (`apps/api` + `scripts/`), run daily by GitHub Actions
+- **Data:** Supabase (daily puzzle + community stats)
+
+There is no always-on backend — the daily puzzle is pre-built into Supabase and the
+game engine (guess scoring, hints, photo reveals) is a TypeScript port that runs
+client-side.
 
 ## Daily use
 
-From the **project root**, one command starts the API and web together (no venv activation, no second terminal):
+From the **project root**:
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). API runs on [http://localhost:8000](http://localhost:8000).
+Open [http://localhost:3000](http://localhost:3000). Requires `NEXT_PUBLIC_SUPABASE_*`
+in `fundle.config.env` and at least one puzzle row in Supabase (see below).
 
 ## First-time setup
 
@@ -35,69 +40,47 @@ npm run setup
 
 That creates the API venv, installs Python and npm dependencies, copies `fundle.config.env.example` → `fundle.config.env` (if needed), and syncs env files. Then use `npm run dev` for daily development.
 
-Local settings live in `fundle.config.env` (gitignored). Copy from `fundle.config.env.example` if needed.
+Local settings live in `fundle.config.env` (gitignored). Copy from `fundle.config.env.example` and fill in your Supabase keys.
 
-**Debug:** set `DEBUG_FRESH=1` in `fundle.config.env` to reset guesses and reload the puzzle on every page refresh. Use `0` for normal daily persistence.
-
-Local database file: `apps/api/fundle.db` (SQLite, created on first run).
+**Debug:** set `DEBUG_FRESH=1` in `fundle.config.env` to start a fresh game on every page refresh. Use `0` for normal daily persistence (state in localStorage).
 
 ### Daily puzzle
 
-Puzzle day boundaries use **Europe/Amsterdam** (midnight NL time), not UTC.
+Puzzle day boundaries use **Europe/Amsterdam** (midnight NL time), not UTC. The
+puzzle is published to Supabase, not a local DB.
 
-Refresh today's puzzle from Funda (from the project root):
-
-<details>
-<summary><b>Windows</b></summary>
-
-```powershell
-cd apps\api
-.\.venv\Scripts\Activate.ps1
-python ..\..\scripts\build_daily_puzzle.py
-```
-
-</details>
-
-<details>
-<summary><b>Mac / Linux</b></summary>
+Build/refresh today's puzzle from Funda (from the project root, with Supabase env set):
 
 ```bash
-cd apps/api
-source .venv/bin/activate
-python ../../scripts/build_daily_puzzle.py
+uv run --project apps/api python scripts/build_daily_puzzle.py          # today
+uv run --project apps/api python scripts/build_daily_puzzle.py --force   # rebuild
 ```
 
-</details>
-
-**Production (Render):** add a **Cron Job** that runs daily at `5 0 * * *` with timezone **Europe/Amsterdam**:
-
-- **Command:** `python ../../scripts/build_daily_puzzle.py`
-- **Root directory:** `apps/api` (same as the web service)
-
-This pre-builds the puzzle so the first visitor does not wait on Funda.
+**Production:** the [`build-puzzle`](.github/workflows/build-puzzle.yml) GitHub
+Action runs daily at Amsterdam midnight (22:00/23:00 UTC depending on DST) and upserts the
+puzzle into Supabase. Trigger it manually from the Actions tab (`workflow_dispatch`)
+to seed/backfill. No server, no cron host needed.
 
 ## Project layout
 
 ```
-apps/api/     FastAPI + pyfunda
-apps/web/     Next.js UI
-scripts/      Cron-friendly puzzle builder
+apps/api/     pyfunda scraping + puzzle builder (+ retained game.py for parity fixtures)
+apps/web/     Next.js UI + client-side game engine (lib/engine.ts)
+scripts/      build_daily_puzzle.py (Supabase publish), gen_parity_fixtures.py
+supabase/     schema.sql (tables, RLS, stats RPC) — run once in the dashboard
 ```
 
 ## Testing
 
-Run the API test suite from the project root:
-
 ```bash
-cd apps/api
-uv run pytest
+cd apps/api && uv run pytest && uv run ruff check app tests   # builder + obfuscation + game logic
+cd apps/web && npm test                                       # TS engine + cross-language parity
 ```
 
-Lint the API with Ruff:
+If you change game logic on either side, regenerate parity fixtures:
 
 ```bash
-cd apps/api
-uv run ruff check app tests
+uv run --project apps/api python scripts/gen_parity_fixtures.py
 ```
 
 ## License note
