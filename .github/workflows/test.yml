@@ -2,7 +2,10 @@ name: Test
 
 on:
   push:
-    branches: [main, feature/**, chore/**, feat/**]
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/test.yml"
   pull_request:
     branches: [main]
 
