@@ -17,8 +17,7 @@
 
 There is no always-on backend — the daily puzzle is pre-built into Supabase and the
 game engine (guess scoring, hints, photo reveals) is a TypeScript port that runs
-client-side. See [MIGRATION_README.md](MIGRATION_README.md) for the architecture
-and the accounts/secrets needed.
+client-side.
 
 ## Daily use
 
