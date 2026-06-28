@@ -1,0 +1,43 @@
+name: Build daily puzzle
+
+on:
+  schedule:
+    # 23:05 UTC = 00:05 (winter) / 01:05 (summer) Europe/Amsterdam — always just
+    # after local midnight, so today_date() resolves to the new Amsterdam day.
+    - cron: "5 23 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Puzzle date (YYYY-MM-DD, default: today in Europe/Amsterdam)"
+        required: false
+      force:
+        description: "Rebuild even if a puzzle already exists for the date"
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-daily-puzzle
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --project apps/api
+
+      - name: Build and publish puzzle
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PRICE_BUCKETS: ${{ vars.PRICE_BUCKETS }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.date }}" ]; then ARGS="$ARGS --date ${{ inputs.date }}"; fi
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          uv run --project apps/api python scripts/build_daily_puzzle.py $ARGS
