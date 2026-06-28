@@ -4,7 +4,7 @@
 
 import { computeState, decodeAnswer, evaluateGuess, MAX_GUESSES, type Puzzle } from "./engine";
 import { clearGame, defaultGame, loadGame, saveGame } from "./gameStore";
-import { fetchRandomPuzzleRow, fetchStats, fetchTodayPuzzleRow, recordResult, type PuzzleRow } from "./supabase";
+import { fetchStats, fetchTodayPuzzleRow, recordResult, type PuzzleRow } from "./supabase";
 import { getOrCreateSessionId, isDebugFresh } from "./storage";
 import type { PuzzleState } from "./types";
 
@@ -54,9 +54,9 @@ function logDebugAnswer(puzzle: Puzzle): void {
 
 export async function fetchToday(): Promise<PuzzleState> {
   if (isDebugFresh()) {
-    // Dev: each refresh shows a random seeded listing with a clean board, and
-    // never resumes saved state. Seed a pool with `build_daily_puzzle.py --pool N`.
-    const puzzle = toPuzzle(await fetchRandomPuzzleRow());
+    const res = await fetch("/api/debug-log");
+    if (!res.ok) throw new Error("Failed to fetch random puzzle");
+    const puzzle = toPuzzle((await res.json()) as PuzzleRow);
     logDebugAnswer(puzzle); // prints price+city to the dev terminal
     clearGame(puzzle.puzzle_date);
     return computeState(puzzle, defaultGame(), getOrCreateSessionId());
