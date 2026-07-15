@@ -1,0 +1,1122 @@
+<!doctype html>
+<!--
+  Fundle growth chart — standalone. Open directly in a browser (no build/server).
+
+  The DATA array near the bottom of this file is a snapshot of Supabase
+  `puzzle_stats`. To refresh it, re-run the read-only query below and paste the
+  rows into DATA (puzzle_stats is anon-readable, so the anon key is enough):
+
+    URL=$(grep -E '^SUPABASE_URL=' fundle.config.env | cut -d= -f2- | tr -d '"' | sed 's:/*$::')
+    KEY=$(grep -E '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' fundle.config.env | cut -d= -f2- | tr -d '"')
+    curl -s "$URL/rest/v1/puzzle_stats?select=puzzle_date,plays,solves&order=puzzle_date.asc" \
+      -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+
+  Palette matches the dataviz reference (blue #2a78d6 / yellow #eda100), validated
+  colorblind-safe in both light and dark. Theme follows the OS / a data-theme attr.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fundle · daily plays</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<style>
+  :root {
+    --surface: #fcfcfb;
+    --plane: #f4f3ef;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --plays: #2a78d6;
+    --solves: #eda100;
+    --card: #ffffff;
+    --card-brd: #e7e6df;
+    --good: #006300;
+    --bad: #b3261e;
+    --shadow: 0 1px 2px rgba(20,20,18,.05), 0 6px 20px rgba(20,20,18,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --plane: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7;
+      --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+      --plays: #3987e5; --solves: #c98500; --card: #201f1e; --card-brd: #2c2c2a;
+      --good: #0ca30c; --bad: #ff6b60; --shadow: none;
+    }
+  }
+  :root[data-theme="light"] {
+    --surface: #fcfcfb; --plane: #f4f3ef; --ink: #0b0b0b; --ink-2: #52514e;
+    --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
+    --plays: #2a78d6; --solves: #eda100; --card: #ffffff; --card-brd: #e7e6df;
+    --good: #006300; --bad: #b3261e; --shadow: 0 1px 2px rgba(20,20,18,.05), 0 6px 20px rgba(20,20,18,.04);
+  }
+  :root[data-theme="dark"] {
+    --surface: #1a1a19; --plane: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --plays: #3987e5; --solves: #c98500; --card: #201f1e; --card-brd: #2c2c2a;
+    --good: #0ca30c; --bad: #ff6b60; --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--plane); color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 40px 24px 64px; }
+
+  header { margin-bottom: 28px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; margin: 0 0 8px;
+  }
+  h1 { font-size: 30px; line-height: 1.1; margin: 0 0 6px; letter-spacing: -.02em; text-wrap: balance; }
+  .sub { color: var(--ink-2); font-size: 15px; margin: 0; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0 32px; }
+  @media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--card); border: 1px solid var(--card-brd); border-radius: 12px;
+    padding: 16px; box-shadow: var(--shadow);
+  }
+  .tile .k { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .tile .v { font-size: 28px; font-weight: 680; margin-top: 6px; letter-spacing: -.02em; }
+  .tile .d { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+  .tile .d.up { color: var(--good); font-weight: 600; }
+  .tile .d.down { color: var(--bad); font-weight: 600; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--card-brd); border-radius: 14px;
+    padding: 20px 20px 12px; box-shadow: var(--shadow); margin-bottom: 20px;
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+  .card h2 { font-size: 16px; margin: 0; letter-spacing: -.01em; }
+  .card .note { font-size: 13px; color: var(--ink-2); margin: 2px 0 0; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .chart { width: 100%; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; }
+  .axis-label { fill: var(--muted); font-size: 11px; }
+  .val-label { fill: var(--ink); font-size: 11px; font-weight: 600; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .baseline { stroke: var(--axis); stroke-width: 1.5; }
+
+  .tt {
+    position: fixed; pointer-events: none; opacity: 0; transform: translateY(-4px);
+    transition: opacity .1s; background: var(--card); border: 1px solid var(--card-brd);
+    border-radius: 9px; padding: 9px 11px; box-shadow: 0 4px 16px rgba(0,0,0,.16);
+    font-size: 12.5px; color: var(--ink); z-index: 10; min-width: 130px;
+  }
+  .tt .tt-d { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .tt .tt-r { display: flex; align-items: center; gap: 7px; line-height: 1.5; }
+  .tt .tt-r b { margin-left: auto; }
+  .hit { cursor: default; }
+
+  footer { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin-top: 8px; }
+  footer code { background: var(--surface); border: 1px solid var(--card-brd); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
+
+  .creds-banner {
+    background: var(--surface); border: 1px solid var(--card-brd); border-radius: 8px;
+    padding: 16px; margin-bottom: 24px; display: none;
+  }
+  .creds-banner.show { display: block; }
+  .creds-banner label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; margin-top: 8px; }
+  .creds-banner label:first-child { margin-top: 0; }
+  .creds-banner input { width: 100%; padding: 8px 10px; border: 1px solid var(--card-brd); border-radius: 6px; font-size: 12px; background: var(--card); color: var(--ink); box-sizing: border-box; }
+  .creds-banner button { margin-top: 12px; padding: 8px 12px; background: var(--plays); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .creds-banner button:hover { opacity: 0.9; }
+
+  .data-status {
+    font-size: 12px; color: var(--muted); margin-bottom: 16px; display: inline-block;
+  }
+  .data-status.fresh { color: var(--good); }
+  .data-status button { background: none; border: none; color: var(--plays); cursor: pointer; text-decoration: underline; padding: 0; font-size: 12px; }
+  .data-status button:hover { opacity: 0.8; }
+
+  #customRange { display: none; gap: 8px; }
+  #customRange.show { display: flex; }
+
+  /* ---- Leaflet map ---- */
+  #mapCanvas { height: 520px; border-radius: 12px; overflow: hidden; border: 1px solid var(--card-brd); background: var(--plane); }
+  .leaflet-container { font: inherit; background: var(--plane); }
+  .puzzle-dot { border-radius: 50%; background: var(--plays); border: 2px solid var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+  /* Cluster blobs — soft radial "heat" glow, normalized size (set inline) */
+  .mc-wrap { background: transparent; }
+  .mc-inner {
+    position: relative; border-radius: 50%; text-align: center;
+    color: #fff; font-weight: 700; letter-spacing: .01em;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 50%,
+      rgba(42,120,214,0.95) 0%, rgba(42,120,214,0.78) 42%,
+      rgba(42,120,214,0.32) 72%, rgba(42,120,214,0.10) 100%);
+    box-shadow: 0 0 14px 4px rgba(42,120,214,0.35), inset 0 0 8px rgba(255,255,255,0.18);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    transition: transform .12s ease;
+  }
+  .mc-inner:hover { transform: scale(1.06); }
+  /* Tiny, unobtrusive map attribution */
+  .leaflet-control-attribution { font-size: 9px !important; background: rgba(255,255,255,.55) !important; padding: 0 4px !important; }
+  @media (prefers-color-scheme: dark) { .leaflet-control-attribution { background: rgba(0,0,0,.4) !important; } .leaflet-control-attribution a { color: var(--ink-2) !important; } }
+  /* Popup */
+  .map-pop { min-width: 150px; }
+  .map-pop .mp-d { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+  .map-pop .mp-city { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .map-pop .mp-sub { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+  .map-pop .mp-link { display: inline-block; margin-top: 8px; color: var(--plays); font-size: 12.5px; font-weight: 600; text-decoration: none; }
+  .leaflet-popup-content-wrapper { background: var(--card); color: var(--ink); border: 1px solid var(--card-brd); border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.16); }
+  .leaflet-popup-tip { background: var(--card); border: 1px solid var(--card-brd); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">fundle.fun · community stats</p>
+    <h1>Daily plays are growing</h1>
+    <p class="sub">Finished games recorded per day since stats went live — a proxy for daily active players.</p>
+  </header>
+
+  <div class="creds-banner" id="credsBanner">
+    <p style="margin: 0 0 8px; font-size: 13px; color: var(--ink-2);">Supabase credentials needed to fetch fresh data:</p>
+    <label>Supabase URL<input type="text" id="supabaseUrl" placeholder="https://xxx.supabase.co"></label>
+    <label>Anon key<input type="password" id="anonKey" placeholder="eyJxxx..."></label>
+    <button onclick="saveCreds()">Load fresh data</button>
+  </div>
+
+  <div class="data-status" id="dataStatus"></div>
+
+  <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+    <select id="datePreset" style="padding: 8px 10px; border: 1px solid var(--card-brd); border-radius: 6px; background: var(--card); color: var(--ink); font-size: 13px;">
+      <option value="all">All time</option>
+      <option value="30d">Last 30 days</option>
+      <option value="7d">Last 7 days</option>
+      <option value="custom">Custom range</option>
+    </select>
+    <div id="customRange">
+      <input type="date" id="dateFrom" style="padding: 8px 10px; border: 1px solid var(--card-brd); border-radius: 6px; background: var(--card); color: var(--ink); font-size: 13px;">
+      <span style="color: var(--muted);">to</span>
+      <input type="date" id="dateTo" style="padding: 8px 10px; border: 1px solid var(--card-brd); border-radius: 6px; background: var(--card); color: var(--ink); font-size: 13px;">
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Plays &amp; solves per day</h2>
+        <p class="note">Each finished game records one result via the <code>record_result</code> RPC.</p>
+      </div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--plays)"></i>Plays</span>
+        <span><i class="swatch" style="background:var(--solves)"></i>Solves</span>
+      </div>
+    </div>
+    <div class="chart"><svg id="bars" viewBox="0 0 720 300" role="img" aria-label="Grouped bar chart of daily plays and solves"></svg></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Cumulative plays</h2>
+        <p class="note">Total finished games to date — the growth curve.</p>
+      </div>
+    </div>
+    <div class="chart"><svg id="area" viewBox="0 0 720 260" role="img" aria-label="Area chart of cumulative plays over time"></svg></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Guess distribution</h2>
+        <p class="note">How many solvers finished in 1, 2, 3, 4, 5 guesses, or lost.</p>
+      </div>
+    </div>
+    <div class="chart"><svg id="distribution" viewBox="0 0 720 280" role="img" aria-label="Stacked bar chart of guess distribution"></svg></div>
+  </section>
+
+  <section class="card" id="uniqueCard">
+    <div class="card-head">
+      <div>
+        <h2>Unique players</h2>
+        <p class="note" id="uniqueNote">Distinct households (hashed IP) and browser sessions per day.</p>
+      </div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--plays)"></i>Unique IPs</span>
+        <span><i class="swatch" style="background:var(--solves)"></i>Sessions</span>
+      </div>
+    </div>
+    <div class="chart"><svg id="unique" viewBox="0 0 720 280" role="img" aria-label="Bar chart of unique players per day"></svg></div>
+  </section>
+
+  <section class="card" id="timingCard">
+    <div class="card-head">
+      <div>
+        <h2>When people play</h2>
+        <p class="note" id="timingNote">Finished games by hour of day (Europe/Amsterdam).</p>
+      </div>
+    </div>
+    <div class="chart"><svg id="timing" viewBox="0 0 720 260" role="img" aria-label="Histogram of plays by hour of day"></svg></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Win rate & difficulty</h2>
+        <p class="note">Solve percentage and median guesses over time.</p>
+      </div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--plays)"></i>Win rate %</span>
+        <span><i class="swatch" style="background:var(--solves)"></i>Median guesses</span>
+      </div>
+    </div>
+    <div class="chart"><svg id="difficulty" viewBox="0 0 720 280" role="img" aria-label="Dual-axis chart of win rate and median guesses"></svg></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Puzzle locations</h2>
+        <p class="note">One marker per puzzle, clustered by area. Scroll to zoom and clusters split apart — click a marker to open the listing on Funda.</p>
+      </div>
+    </div>
+    <div id="mapCanvas" role="img" aria-label="Map of puzzle locations across the Netherlands"></div>
+  </section>
+
+  <footer>
+    Source: Supabase<code>0002</code>.
+  </footer>
+</div>
+
+<div class="tt" id="tt"></div>
+
+<script>
+// Fallback data: snapshot from when the file was created
+const FALLBACK_DATA = [
+  { date: "2026-06-28", plays: 24,  solves: 17  },
+  { date: "2026-06-29", plays: 43,  solves: 31  },
+  { date: "2026-06-30", plays: 41,  solves: 30  },
+  { date: "2026-07-01", plays: 76,  solves: 54  },
+  { date: "2026-07-02", plays: 52,  solves: 40  },
+  { date: "2026-07-03", plays: 50,  solves: 34  },
+  { date: "2026-07-04", plays: 290, solves: 197 },
+  { date: "2026-07-05", plays: 186, solves: 106 },
+  { date: "2026-07-06", plays: 160, solves: 115 },
+];
+
+let DATA = [...FALLBACK_DATA];
+let PUZZLES = [];
+let SUBMISSIONS = [];   // {created_at, puzzle_date} — for the guess-timing chart
+let dataIsFresh = false;
+let lastFetchTime = null;
+let dateFrom = null;
+let dateTo = null;
+
+// ---- geocoding (OpenStreetMap Nominatim, free/no-key) with localStorage cache ----
+// Puzzle payloads store city/neighbourhood/province but no coordinates, so we
+// resolve them on demand. Results are cached forever (towns don't move) and
+// network calls are serialized to ~1 req/s to respect Nominatim's usage policy.
+const geoCache = JSON.parse(localStorage.getItem("geoCache") || "{}");
+const saveGeoCache = () => localStorage.setItem("geoCache", JSON.stringify(geoCache));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let geoChain = Promise.resolve();
+let geoLastNet = 0;
+
+function geocode(query) {
+  if (query in geoCache) return Promise.resolve(geoCache[query]);
+  geoChain = geoChain.then(async () => {
+    if (query in geoCache) return;              // filled while we were queued
+    const wait = 1100 - (Date.now() - geoLastNet);
+    if (wait > 0) await sleep(wait);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=nl&q=${encodeURIComponent(query)}`
+      );
+      const arr = res.ok ? await res.json() : [];
+      geoCache[query] = arr[0] ? [ +arr[0].lat, +arr[0].lon ] : null;
+    } catch (e) {
+      geoCache[query] = null;
+    }
+    geoLastNet = Date.now();
+    saveGeoCache();
+  });
+  return geoChain.then(() => geoCache[query]);
+}
+
+function saveCreds() {
+  const url = document.getElementById("supabaseUrl").value.trim();
+  const key = document.getElementById("anonKey").value.trim();
+  if (!url || !key) { alert("Please enter both URL and key"); return; }
+  localStorage.setItem("supabase_url", url);
+  localStorage.setItem("anon_key", key);
+  fetchFreshData();
+}
+
+async function fetchFreshData() {
+  let url = window._supabase_url || localStorage.getItem("supabase_url");
+  let key = window._anon_key || localStorage.getItem("anon_key");
+  if (!url || !key) { showDataStatus(false); return; }
+
+  try {
+    const headers = { "apikey": key, "Authorization": `Bearer ${key}` };
+
+    // Fetch puzzle_stats. Normalize puzzle_date -> date so the rest of the
+    // dashboard (which filters/draws on `date`) works the same as FALLBACK_DATA.
+    const statsRes = await fetch(
+      `${url}/rest/v1/puzzle_stats?select=puzzle_date,plays,solves,guess_buckets&order=puzzle_date.asc`,
+      { headers }
+    );
+    if (!statsRes.ok) throw new Error(`Stats HTTP ${statsRes.status}`);
+    const statsRows = await statsRes.json();
+    DATA = statsRows.map(r => ({
+      date: r.puzzle_date,
+      plays: r.plays,
+      solves: r.solves,
+      guess_buckets: r.guess_buckets,
+    }));
+
+    // Note: result_submissions is not readable by anon users (RLS), but guess_buckets
+    // in puzzle_stats already contains the distribution data we need
+
+    // Fetch puzzles with location data from payload (also normalize the date field)
+    try {
+      const puzzlesRes = await fetch(
+        `${url}/rest/v1/daily_puzzles?select=puzzle_date,payload&order=puzzle_date.asc`,
+        { headers }
+      );
+      if (puzzlesRes.ok) {
+        const puzzleRows = await puzzlesRes.json();
+        PUZZLES = puzzleRows.map(p => ({ date: p.puzzle_date, payload: p.payload }));
+      }
+    } catch (e) {
+      console.warn("Could not fetch daily_puzzles:", e);
+    }
+
+    // Per-submission timestamps for the "when people play" chart. These live in
+    // result_submissions, which is RLS-locked from anon, so this needs the
+    // service-role key (injected locally by serve-growth-chart.js). Optional.
+    const serviceKey = window._service_key;
+    if (serviceKey) {
+      try {
+        const subRes = await fetch(
+          `${url}/rest/v1/result_submissions?select=created_at,puzzle_date,ip_hash,session_id&order=created_at.asc&limit=100000`,
+          { headers: { "apikey": serviceKey, "Authorization": `Bearer ${serviceKey}` } }
+        );
+        if (subRes.ok) SUBMISSIONS = await subRes.json();
+      } catch (e) {
+        console.warn("Could not fetch result_submissions:", e);
+      }
+    }
+
+    dataIsFresh = true;
+    lastFetchTime = new Date();
+    updateDateRange();  // Initialize date range filters now that data is loaded
+    showDataStatus(true);
+    geocodePuzzles();   // resolve coordinates + draw map markers (async, progressive)
+  } catch (e) {
+    console.error("Failed to fetch fresh data:", e);
+    showDataStatus(false);
+    updateDateRange();  // Fall back to rendering the snapshot through the filter
+  }
+}
+
+function applyDateFilter() {
+  // Calculate date range based on current selection
+  if (!dateFrom || !dateTo) return;
+  // Filtering will happen in the draw functions
+}
+
+function showDataStatus(isFresh) {
+  const el = document.getElementById("dataStatus");
+  const bannerEl = document.getElementById("credsBanner");
+  if (isFresh) {
+    const time = lastFetchTime.toLocaleTimeString("nl-NL");
+    el.className = "data-status fresh";
+    el.innerHTML = `✓ Fresh data from Supabase (fetched at ${time}) · <button onclick="promptCreds()">update</button>`;
+    bannerEl.classList.remove("show");
+  } else {
+    const hasInjected = window._supabase_url && window._anon_key;
+    const msg = hasInjected ? "Fetch failed with injected credentials" : "Using fallback data (no credentials)";
+    el.className = "data-status";
+    el.innerHTML = `${msg} · <button onclick="promptCreds()">enter credentials</button>`;
+    if (!hasInjected) bannerEl.classList.add("show");
+  }
+}
+
+function promptCreds() {
+  document.getElementById("credsBanner").classList.add("show");
+  const urlEl = document.getElementById("supabaseUrl");
+  const keyEl = document.getElementById("anonKey");
+  urlEl.value = localStorage.getItem("supabase_url") || "";
+  keyEl.value = localStorage.getItem("anon_key") || "";
+  urlEl.focus();
+}
+
+function redrawCharts() {
+  drawTiles();
+  drawBars();
+  drawArea();
+  if (DATA.length > 0) {
+    drawDistribution();
+    drawDifficulty();
+  }
+  drawUnique();
+  drawTiming();
+  if (PUZZLES.length > 0) {
+    drawMap();     // re-cluster for the active date filter
+  }
+}
+
+// Hour-of-day (Europe/Amsterdam) that a submission's created_at falls into.
+const amsterdamHour = ts => {
+  const h = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Amsterdam", hour: "2-digit", hour12: false
+  }).format(new Date(ts));
+  return parseInt(h, 10) % 24;
+};
+
+// ---- unique players per day ----
+// ip_hash is md5(ip + ':' + date) — salted per day, so it identifies distinct
+// households *within* a day only, never across days. That makes this a per-day
+// unique count by design (and keeps it non-tracking).
+function drawUnique() {
+  const card = document.getElementById("uniqueCard");
+  const svg = document.getElementById("unique");
+  if (!svg) return;
+  svg.innerHTML = "";
+
+  if (!SUBMISSIONS.length) { if (card) card.style.display = "none"; return; }
+  if (card) card.style.display = "";
+
+  const inRange = SUBMISSIONS.filter(s =>
+    (!dateFrom || s.puzzle_date >= dateFrom) && (!dateTo || s.puzzle_date <= dateTo));
+
+  const byDay = new Map();
+  inRange.forEach(s => {
+    if (!byDay.has(s.puzzle_date)) byDay.set(s.puzzle_date, { ips: new Set(), sess: new Set() });
+    const e = byDay.get(s.puzzle_date);
+    if (s.ip_hash) e.ips.add(s.ip_hash);
+    if (s.session_id) e.sess.add(s.session_id);
+  });
+  const days = [...byDay.keys()].sort().map(d => ({
+    date: d, ips: byDay.get(d).ips.size, sess: byDay.get(d).sess.size
+  }));
+  if (!days.length) return;
+
+  const note = document.getElementById("uniqueNote");
+  if (note) note.textContent =
+    `Distinct households (hashed IP) and browser sessions per day — recorded since ${fmtDay(days[0].date)} ${days[0].date.slice(0,4)}.`;
+
+  const W = 720, H = 280, m = { t: 18, r: 12, b: 40, l: 44 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const { ticks, top } = niceTicks(Math.max(...days.map(d => Math.max(d.ips, d.sess))), 4);
+  const y = v => m.t + ih - (top > 0 ? v / top : 0) * ih;
+
+  ticks.forEach(t => {
+    svg.appendChild(el("line", { class: "grid-line", x1: m.l, x2: m.l + iw, y1: y(t), y2: y(t) }));
+    const tx = el("text", { class: "axis-label", x: m.l - 8, y: y(t) + 3, "text-anchor": "end" });
+    tx.textContent = t; svg.appendChild(tx);
+  });
+  svg.appendChild(el("line", { class: "baseline", x1: m.l, x2: m.l + iw, y1: y(0), y2: y(0) }));
+
+  const band = iw / days.length;
+  const gw = Math.min(band * 0.62, 46);
+  const bw = (gw - 2) / 2;
+  const bar = (x, v, color) => {
+    const yy = y(v), hh = y(0) - yy, rr = Math.min(4, hh);
+    return el("path", {
+      d: `M${x} ${y(0)} L${x} ${yy+rr} Q${x} ${yy} ${x+rr} ${yy} L${x+bw-rr} ${yy} Q${x+bw} ${yy} ${x+bw} ${yy+rr} L${x+bw} ${y(0)} Z`,
+      fill: `var(${color})`
+    });
+  };
+
+  days.forEach((d, i) => {
+    const cx = m.l + band * i + band / 2;
+    const x0 = cx - gw / 2;
+    svg.appendChild(bar(x0, d.ips, "--plays"));
+    svg.appendChild(bar(x0 + bw + 2, d.sess, "--solves"));
+
+    const lbl = el("text", { class: "axis-label", x: cx, y: H - m.b + 16, "text-anchor": "middle" });
+    lbl.textContent = fmtDay(d.date); svg.appendChild(lbl);
+
+    const hit = el("rect", { class: "hit", x: m.l + band * i, y: m.t, width: band, height: ih, fill: "transparent" });
+    const html = `<div class="tt-d">${fmtDay(d.date)} ${d.date.slice(0,4)}</div>` +
+      `<div class="tt-r"><i class="swatch" style="background:var(--plays)"></i>Unique IPs <b>${d.ips}</b></div>` +
+      `<div class="tt-r"><i class="swatch" style="background:var(--solves)"></i>Sessions <b>${d.sess}</b></div>`;
+    hit.addEventListener("mousemove", e => showTT(html, e));
+    hit.addEventListener("mouseleave", hideTT);
+    svg.appendChild(hit);
+  });
+}
+
+// ---- when-people-play histogram (0..23h) ----
+function drawTiming() {
+  const card = document.getElementById("timingCard");
+  const svg = document.getElementById("timing");
+  if (!svg) return;
+  svg.innerHTML = "";
+
+  // Needs the service-role submissions; hide the card entirely if unavailable.
+  if (!SUBMISSIONS.length) {
+    if (card) card.style.display = window._service_key ? "" : "none";
+    if (window._service_key) {
+      const note = document.getElementById("timingNote");
+      if (note) note.textContent = "No submissions in range.";
+    }
+    return;
+  }
+  if (card) card.style.display = "";
+
+  const inRange = SUBMISSIONS.filter(s =>
+    (!dateFrom || s.puzzle_date >= dateFrom) && (!dateTo || s.puzzle_date <= dateTo));
+  const hours = new Array(24).fill(0);
+  inRange.forEach(s => { hours[amsterdamHour(s.created_at)]++; });
+
+  const note = document.getElementById("timingNote");
+  if (note) note.textContent =
+    `${inRange.length.toLocaleString("nl-NL")} finished games by hour of day (Europe/Amsterdam).`;
+
+  const W = 720, H = 260, m = { t: 18, r: 12, b: 40, l: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const { ticks, top } = niceTicks(Math.max(...hours), 4);
+  const y = v => m.t + ih - (top > 0 ? v / top : 0) * ih;
+
+  ticks.forEach(t => {
+    svg.appendChild(el("line", { class: "grid-line", x1: m.l, x2: m.l + iw, y1: y(t), y2: y(t) }));
+    const tx = el("text", { class: "axis-label", x: m.l - 8, y: y(t) + 3, "text-anchor": "end" });
+    tx.textContent = t; svg.appendChild(tx);
+  });
+  svg.appendChild(el("line", { class: "baseline", x1: m.l, x2: m.l + iw, y1: y(0), y2: y(0) }));
+
+  const band = iw / 24;
+  const bw = band * 0.7;
+  const peak = Math.max(...hours);
+  hours.forEach((v, h) => {
+    const x = m.l + band * h + (band - bw) / 2;
+    const hh = y(0) - y(v);
+    const rr = Math.min(3, hh);
+    if (v > 0) svg.appendChild(el("path", {
+      d: `M${x} ${y(0)} L${x} ${y(v)+rr} Q${x} ${y(v)} ${x+rr} ${y(v)} L${x+bw-rr} ${y(v)} Q${x+bw} ${y(v)} ${x+bw} ${y(v)+rr} L${x+bw} ${y(0)} Z`,
+      fill: "var(--plays)", "fill-opacity": v === peak ? "0.95" : "0.7"
+    }));
+    if (h % 3 === 0) {
+      const lbl = el("text", { class: "axis-label", x: m.l + band * h + band / 2, y: H - m.b + 16, "text-anchor": "middle" });
+      lbl.textContent = `${h}h`; svg.appendChild(lbl);
+    }
+    const hit = el("rect", { class: "hit", x: m.l + band * h, y: m.t, width: band, height: ih, fill: "transparent" });
+    const pct = inRange.length ? Math.round(v / inRange.length * 100) : 0;
+    const html = `<div class="tt-d">${h}:00 – ${h}:59</div>` +
+      `<div class="tt-r"><i class="swatch" style="background:var(--plays)"></i>Plays <b>${v}</b></div>` +
+      `<div class="tt-r" style="color:var(--muted)">Share <b>${pct}%</b></div>`;
+    hit.addEventListener("mousemove", e => showTT(html, e));
+    hit.addEventListener("mouseleave", hideTT);
+    svg.appendChild(hit);
+  });
+}
+
+const fmtDay = iso => {
+  const [ , m, d ] = iso.split("-").map(Number);
+  return `${d} ${["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"][m-1]}`;
+};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ---- stat tiles ----
+function drawTiles() {
+  const filtered = filterByDate(DATA);
+  if (filtered.length === 0) {
+    document.getElementById("tiles").innerHTML = "";
+    return;
+  }
+  const totalPlays = filtered.reduce((a,d)=>a+d.plays,0);
+  const totalSolves = filtered.reduce((a,d)=>a+d.solves,0);
+  const rate = Math.round(totalSolves/totalPlays*100);
+  const peak = Math.max(...filtered.map(d=>d.plays));
+  const peakDate = filtered.find(d=>d.plays === peak).date;
+
+  // Growth: last *complete* day vs. the average of the 7 days before it.
+  // (Today is still in progress, so it's excluded from "last full day".)
+  const todayAms = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam" }).format(new Date());
+  let lfIdx = -1;
+  for (let i = 0; i < filtered.length; i++) if (filtered[i].date < todayAms) lfIdx = i;
+  if (lfIdx === -1) lfIdx = filtered.length - 1;         // all data is today -> fall back
+  const lastFull = filtered[lfIdx];
+  const prevWeek = filtered.slice(Math.max(0, lfIdx - 7), lfIdx);
+  const avgPrev = prevWeek.length ? prevWeek.reduce((a,d)=>a+d.plays,0) / prevWeek.length : null;
+  const wow = avgPrev ? Math.round((lastFull.plays / avgPrev - 1) * 100) : null;
+  const wowDesc = wow === null
+    ? `${fmtDay(lastFull.date)} ${lastFull.date.slice(0,4)}`
+    : `${wow >= 0 ? "+" : ""}${wow}% vs. prior-week avg (${Math.round(avgPrev)})`;
+
+  document.getElementById("tiles").innerHTML = [
+    { k:"Total plays", v: totalPlays.toLocaleString("nl-NL"), d:`${filtered.length} days tracked` },
+    { k:"Total solves", v: totalSolves.toLocaleString("nl-NL"), d:`${rate}% solve rate` },
+    { k:"Peak day", v: peak.toString(), d:`${fmtDay(peakDate)} ${peakDate.slice(0,4)}` },
+    { k:"Last full day", v: `${lastFull.plays}`, d: wowDesc,
+      up: wow !== null && wow >= 0, down: wow !== null && wow < 0 },
+  ].map(t=>`<div class="tile"><div class="k">${t.k}</div><div class="v">${t.v}</div><div class="d${t.up?' up':''}${t.down?' down':''}">${t.d}</div></div>`).join("");
+}
+
+drawTiles();
+
+const tt = document.getElementById("tt");
+function showTT(html, e){ tt.innerHTML = html; tt.style.opacity = 1; moveTT(e); }
+function moveTT(e){
+  const pad = 14, w = tt.offsetWidth, h = tt.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY - h - pad;
+  if (x + w > innerWidth) x = e.clientX - w - pad;
+  if (y < 8) y = e.clientY + pad;
+  tt.style.left = x + "px"; tt.style.top = y + "px";
+}
+function hideTT(){ tt.style.opacity = 0; }
+addEventListener("scroll", hideTT, true);
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+function niceTicks(max, count){
+  if (max <= 0) return { ticks: [0], top: 1 };
+  const raw = max / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const top = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+  return { ticks, top };
+}
+
+// ---- grouped bar chart ----
+function drawBars(){
+  const svg = document.getElementById("bars");
+  svg.innerHTML = "";
+  const W = 720, H = 300, m = { t: 18, r: 12, b: 40, l: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const filtered = filterByDate(DATA);
+  if (filtered.length === 0) return;
+  const { ticks, top } = niceTicks(Math.max(...filtered.map(d=>d.plays)), 4);
+  const y = v => m.t + ih - (v/top)*ih;
+
+  ticks.forEach(t => {
+    svg.appendChild(el("line", { class:"grid-line", x1:m.l, x2:m.l+iw, y1:y(t), y2:y(t) }));
+    const tx = el("text", { class:"axis-label", x:m.l-8, y:y(t)+3, "text-anchor":"end" });
+    tx.textContent = t; svg.appendChild(tx);
+  });
+  svg.appendChild(el("line", { class:"baseline", x1:m.l, x2:m.l+iw, y1:y(0), y2:y(0) }));
+
+  const band = iw / filtered.length;
+  const gw = Math.min(band * 0.62, 46);
+  const bw = (gw - 2) / 2;
+  const r = 4;
+  const roundTop = (x, val, color, key) => {
+    const yy = y(val), hh = y(0) - yy;
+    const rr = Math.min(r, hh);
+    const p = el("path", {
+      d: `M${x} ${y(0)} L${x} ${yy+rr} Q${x} ${yy} ${x+rr} ${yy} L${x+bw-rr} ${yy} Q${x+bw} ${yy} ${x+bw} ${yy+rr} L${x+bw} ${y(0)} Z`,
+      fill: `var(${color})`
+    });
+    p.dataset.key = key;
+    return p;
+  };
+
+  filtered.forEach((d, i) => {
+    const cx = m.l + band*i + band/2;
+    const x0 = cx - gw/2;
+    svg.appendChild(roundTop(x0, d.plays, "--plays", "p"));
+    svg.appendChild(roundTop(x0 + bw + 2, d.solves, "--solves", "s"));
+
+    const lbl = el("text", { class:"axis-label", x:cx, y:H-m.b+16, "text-anchor":"middle" });
+    lbl.textContent = fmtDay(d.date); svg.appendChild(lbl);
+
+    // hit target across the whole band
+    const hit = el("rect", { class:"hit", x:m.l+band*i, y:m.t, width:band, height:ih, fill:"transparent" });
+    const html = `<div class="tt-d">${fmtDay(d.date)} 2026</div>`+
+      `<div class="tt-r"><i class="swatch" style="background:var(--plays)"></i>Plays <b>${d.plays}</b></div>`+
+      `<div class="tt-r"><i class="swatch" style="background:var(--solves)"></i>Solves <b>${d.solves}</b></div>`+
+      `<div class="tt-r" style="color:var(--muted)">Solve rate <b>${Math.round(d.solves/d.plays*100)}%</b></div>`;
+    hit.addEventListener("mousemove", e => showTT(html, e));
+    hit.addEventListener("mouseleave", hideTT);
+    svg.appendChild(hit);
+  });
+}
+
+// ---- cumulative area chart ----
+function drawArea(){
+  const svg = document.getElementById("area");
+  svg.innerHTML = "";
+  const W = 720, H = 260, m = { t: 18, r: 16, b: 40, l: 46 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const filtered = filterByDate(DATA);
+  if (filtered.length === 0) return;
+  let run = 0;
+  const cum = filtered.map(d => ({ date: d.date, v: (run += d.plays) }));
+  const { ticks, top } = niceTicks(cum[cum.length-1].v, 4);
+  const x = i => m.l + (filtered.length === 1 ? iw/2 : (i/(filtered.length-1))*iw);
+  const y = v => m.t + ih - (v/top)*ih;
+
+  ticks.forEach(t => {
+    svg.appendChild(el("line", { class:"grid-line", x1:m.l, x2:m.l+iw, y1:y(t), y2:y(t) }));
+    const tx = el("text", { class:"axis-label", x:m.l-8, y:y(t)+3, "text-anchor":"end" });
+    tx.textContent = t.toLocaleString("nl-NL"); svg.appendChild(tx);
+  });
+
+  const gid = "areaGrad";
+  const defs = el("defs", {});
+  const lg = el("linearGradient", { id:gid, x1:0, y1:0, x2:0, y2:1 });
+  lg.appendChild(el("stop", { offset:"0%", "stop-color":"var(--plays)", "stop-opacity":"0.22" }));
+  lg.appendChild(el("stop", { offset:"100%", "stop-color":"var(--plays)", "stop-opacity":"0" }));
+  defs.appendChild(lg); svg.appendChild(defs);
+
+  const line = cum.map((d,i)=>`${i?"L":"M"}${x(i).toFixed(1)} ${y(d.v).toFixed(1)}`).join(" ");
+  svg.appendChild(el("path", { d:`${line} L${x(cum.length-1)} ${y(0)} L${x(0)} ${y(0)} Z`, fill:`url(#${gid})` }));
+  svg.appendChild(el("path", { d:line, fill:"none", stroke:"var(--plays)", "stroke-width":2, "stroke-linejoin":"round", "stroke-linecap":"round" }));
+
+  cum.forEach((d,i) => {
+    const last = i === cum.length-1;
+    if (last) {
+      svg.appendChild(el("circle", { cx:x(i), cy:y(d.v), r:5, fill:"var(--plays)", stroke:"var(--card)", "stroke-width":2 }));
+      const t = el("text", { class:"val-label", x:x(i), y:y(d.v)-10, "text-anchor":"end" });
+      t.textContent = d.v.toLocaleString("nl-NL"); svg.appendChild(t);
+    }
+    if (i % 2 === 0 || last) {
+      const lbl = el("text", { class:"axis-label", x:x(i), y:H-m.b+16, "text-anchor":"middle" });
+      lbl.textContent = fmtDay(d.date); svg.appendChild(lbl);
+    }
+  });
+
+  // crosshair + hover
+  const cross = el("line", { stroke:"var(--axis)", "stroke-width":1, "stroke-dasharray":"3 3", y1:m.t, y2:m.t+ih, opacity:0 });
+  const dot = el("circle", { r:5, fill:"var(--plays)", stroke:"var(--card)", "stroke-width":2, opacity:0 });
+  svg.appendChild(cross); svg.appendChild(dot);
+  const overlay = el("rect", { x:m.l, y:m.t, width:iw, height:ih, fill:"transparent", class:"hit" });
+  overlay.addEventListener("mousemove", e => {
+    const box = svg.getBoundingClientRect();
+    const px = (e.clientX - box.left) / box.width * W;
+    const denom = filtered.length > 1 ? iw/(filtered.length-1) : iw;
+    let i = Math.round((px - m.l) / denom);
+    i = Math.max(0, Math.min(filtered.length-1, i));
+    const d = cum[i];
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("opacity", 1);
+    dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(d.v)); dot.setAttribute("opacity", 1);
+    showTT(`<div class="tt-d">${fmtDay(d.date)} 2026</div>`+
+      `<div class="tt-r"><i class="swatch" style="background:var(--plays)"></i>Cumulative <b>${d.v.toLocaleString("nl-NL")}</b></div>`+
+      `<div class="tt-r" style="color:var(--muted)">That day <b>+${filtered[i].plays}</b></div>`, e);
+  });
+  overlay.addEventListener("mouseleave", () => { hideTT(); cross.setAttribute("opacity",0); dot.setAttribute("opacity",0); });
+  svg.appendChild(overlay);
+}
+
+drawBars(); drawArea();
+function onThemeChange() { redrawCharts(); setMapTiles(); }
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onThemeChange);
+new MutationObserver(onThemeChange).observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+
+// ---- date range selection ----
+function updateDateRange() {
+  const preset = document.getElementById("datePreset").value;
+  const customDiv = document.getElementById("customRange");
+
+  if (preset === "custom") {
+    customDiv.classList.add("show");
+    return;
+  }
+  customDiv.classList.remove("show");
+
+  const from = new Date();
+  if (preset === "7d") {
+    from.setDate(from.getDate() - 7);
+  } else if (preset === "30d") {
+    from.setDate(from.getDate() - 30);
+  } else {
+    from.setTime(0);
+  }
+
+  dateFrom = from.toISOString().split("T")[0];
+  dateTo = new Date().toISOString().split("T")[0];
+  document.getElementById("dateFrom").value = dateFrom;
+  document.getElementById("dateTo").value = dateTo;
+  applyDateFilter();
+  redrawCharts();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("datePreset").addEventListener("change", updateDateRange);
+  ["dateFrom", "dateTo"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+      dateFrom = document.getElementById("dateFrom").value;
+      dateTo = document.getElementById("dateTo").value;
+      applyDateFilter();
+      redrawCharts();
+    });
+  });
+  // Don't call updateDateRange here - wait for data to load first
+});
+
+// ---- helper to filter data by date range ----
+function filterByDate(arr) {
+  if (!dateFrom || !dateTo) return arr;
+  return arr.filter(d => d.date >= dateFrom && d.date <= dateTo);
+}
+
+// ---- guess distribution chart ----
+function drawDistribution() {
+  const svg = document.getElementById("distribution");
+  svg.innerHTML = "";
+  const W = 720, H = 280, m = { t: 18, r: 12, b: 40, l: 40 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+
+  // Aggregate guesses from guess_buckets in puzzle_stats
+  const agg = { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0 };
+  filterByDate(DATA).forEach(d => {
+    if (!d.guess_buckets) return;
+    const buckets = typeof d.guess_buckets === "string" ? JSON.parse(d.guess_buckets) : d.guess_buckets;
+    if (!buckets) return;
+    Object.entries(buckets).forEach(([key, count]) => {
+      if (agg.hasOwnProperty(key)) agg[key] += count;
+    });
+  });
+
+  const labels = ["1", "2", "3", "4", "5", "Lost"];
+  const colors = ["#0ca30c", "#2a78d6", "#eda100", "#e67700", "#c41e3a", "#999999"];
+  const vals = [agg["1"], agg["2"], agg["3"], agg["4"], agg["5"], agg["6"]];
+  const total = vals.reduce((a,b)=>a+b, 0) || 1;
+
+  const y = max => (max === 0) ? m.t + ih : m.t + ih - (max / Math.max(...vals)) * ih;
+  const barWidth = iw / 6 / 1.5;
+  const gap = iw / 6;
+
+  vals.forEach((v, i) => {
+    const x = m.l + gap * i + gap / 2 - barWidth / 2;
+    const h = (v / Math.max(...vals)) * ih || 0;
+    const yy = m.t + ih - h;
+    const r = 4;
+    const rr = Math.min(r, h);
+
+    const path = el("path", {
+      d: `M${x} ${m.t+ih} L${x} ${yy+rr} Q${x} ${yy} ${x+rr} ${yy} L${x+barWidth-rr} ${yy} Q${x+barWidth} ${yy} ${x+barWidth} ${yy+rr} L${x+barWidth} ${m.t+ih} Z`,
+      fill: colors[i]
+    });
+    svg.appendChild(path);
+
+    const lbl = el("text", { class:"axis-label", x:x + barWidth/2, y:H-m.b+16, "text-anchor":"middle" });
+    lbl.textContent = labels[i]; svg.appendChild(lbl);
+
+    const valLbl = el("text", { class:"val-label", x:x + barWidth/2, y:yy - 6, "text-anchor":"middle" });
+    valLbl.textContent = v; svg.appendChild(valLbl);
+  });
+}
+
+// ---- Netherlands puzzle map (Leaflet + marker clustering) ----
+// Real slippy map with CARTO basemap tiles. Markers cluster into blobs when
+// zoomed out and split apart as you zoom in, down to individual listings.
+let lmap = null, lcluster = null, ltiles = null, mapFitted = false;
+
+function themeIsDark() {
+  const attr = document.documentElement.getAttribute("data-theme");
+  if (attr === "dark") return true;
+  if (attr === "light") return false;
+  return matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function setMapTiles() {
+  if (!lmap) return;
+  if (ltiles) lmap.removeLayer(ltiles);
+  const style = themeIsDark() ? "dark_all" : "light_all";
+  ltiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, {
+    subdomains: "abcd", maxZoom: 19,
+    attribution: '© OSM · CARTO'
+  }).addTo(lmap);
+}
+
+let mapTotalMarkers = 0;   // markers currently shown; used to normalize blob size
+
+// Cluster blob size is normalized to the *fraction of all shown puzzles* it holds,
+// so the largest blob is always a good visible size — whether there are 18 puzzles
+// today or thousands after a few years. Individual dots stay 14px.
+function clusterIcon(cluster) {
+  const count = cluster.getChildCount();
+  const frac = mapTotalMarkers > 0 ? count / mapTotalMarkers : 1;
+  const size = Math.round(30 + Math.sqrt(frac) * 28);   // 30px (tiny) .. 58px (holds all)
+  return L.divIcon({
+    className: "mc-wrap",
+    iconSize: [size, size],
+    html: `<div class="mc-inner" style="width:${size}px;height:${size}px;line-height:${size}px">${count}</div>`
+  });
+}
+
+function ensureMapInit() {
+  if (lmap || !window.L) return;
+  lmap = L.map("mapCanvas", { scrollWheelZoom: true, attributionControl: true })
+    .setView([52.15, 5.3], 7);                 // roughly centred on NL
+  lmap.attributionControl.setPrefix(false);    // drop the big "Leaflet" flag
+  setMapTiles();
+  lcluster = L.markerClusterGroup({
+    maxClusterRadius: 55,
+    showCoverageOnHover: false,
+    iconCreateFunction: clusterIcon
+  });
+  lmap.addLayer(lcluster);
+}
+
+const dotIcon = () => L.divIcon({ className: "puzzle-dot", iconSize: [14, 14] });
+
+// Resolve every puzzle's coordinates (cached), then draw. Progressive: redraws
+// as each uncached city comes back from the geocoder.
+async function geocodePuzzles() {
+  for (const p of PUZZLES) {
+    if (p._coords !== undefined) continue;
+    let payload;
+    try { payload = typeof p.payload === "string" ? JSON.parse(p.payload) : p.payload; }
+    catch { p._coords = null; continue; }
+    p._payload = payload;
+
+    const queries = [];
+    if (payload?.neighbourhood && payload?.city) queries.push(`${payload.neighbourhood}, ${payload.city}`);
+    if (payload?.city) queries.push(payload.city);
+    let coords = null;
+    for (const q of queries) { coords = await geocode(q); if (coords) break; }
+    p._coords = coords;
+    drawMap();
+  }
+}
+
+function drawMap() {
+  try {
+    ensureMapInit();
+    if (!lmap || !lcluster) return;
+    lcluster.clearLayers();
+
+    const shown = filterByDate(PUZZLES).filter(p => p._coords);
+    mapTotalMarkers = shown.length;             // normalizes cluster blob sizes
+
+    shown.forEach(p => {
+      const payload = p._payload || {};
+      const marker = L.marker(p._coords, { icon: dotIcon() });
+      const area = payload.living_area ? `${payload.living_area} m²` : "";
+      const bits = [payload.object_type, area].filter(Boolean).join(" · ");
+      marker.bindPopup(
+        `<div class="map-pop"><div class="mp-d">${fmtDay(p.date)} 2026</div>` +
+        `<div class="mp-city">${payload.city || "—"}</div>` +
+        (payload.province ? `<div class="mp-sub">${payload.province}</div>` : "") +
+        (bits ? `<div class="mp-sub">${bits}</div>` : "") +
+        (payload.url ? `<a class="mp-link" href="${payload.url}" target="_blank" rel="noopener">Open on Funda ↗</a>` : "") +
+        `</div>`
+      );
+      lcluster.addLayer(marker);
+    });
+
+    // Frame the data once on first load, zoomed out enough to see the whole
+    // country comfortably (cap keeps it country-level even if puzzles cluster).
+    if (!mapFitted && lcluster.getLayers().length) {
+      lmap.fitBounds(lcluster.getBounds().pad(0.35), { maxZoom: 7 });
+      mapFitted = true;
+    }
+  } catch (e) {
+    console.error("Error drawing map:", e);
+  }
+}
+
+// ---- win rate & difficulty chart ----
+function drawDifficulty() {
+  const svg = document.getElementById("difficulty");
+  svg.innerHTML = "";
+  const W = 720, H = 280, m = { t: 18, r: 44, b: 40, l: 44 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+
+  const filtered = filterByDate(DATA);
+  if (filtered.length === 0) return;
+
+  // Calculate win rates and median guesses per day from guess_buckets
+  const perDay = {};
+  filtered.forEach(d => {
+    if (!d.guess_buckets) {
+      perDay[d.date] = { winRate: 0, median: 0 };
+      return;
+    }
+    const buckets = typeof d.guess_buckets === "string" ? JSON.parse(d.guess_buckets) : d.guess_buckets;
+    if (!buckets) {
+      perDay[d.date] = { winRate: 0, median: 0 };
+      return;
+    }
+    const totals = Object.entries(buckets).reduce((a, [k, v]) => a + v, 0);
+    const won = (buckets["1"] || 0) + (buckets["2"] || 0) + (buckets["3"] || 0) + (buckets["4"] || 0) + (buckets["5"] || 0);
+    const winRate = totals ? (won / totals * 100) : 0;
+
+    // Calculate median guesses
+    const guessesArray = [];
+    [1, 2, 3, 4, 5, 6].forEach(g => {
+      const count = buckets[g.toString()] || 0;
+      for (let i = 0; i < count; i++) guessesArray.push(g);
+    });
+    const median = guessesArray.length ? guessesArray[Math.floor(guessesArray.length / 2)] : 0;
+    perDay[d.date] = { winRate, median };
+  });
+
+  const winRates = filtered.map(d => perDay[d.date]?.winRate || 0);
+  const medians = filtered.map(d => perDay[d.date]?.median || 0);
+
+  const { ticks: winTicks, top: winTop } = niceTicks(100, 4);
+  const maxMedian = Math.max(...medians, 1);
+  const { ticks: medTicks, top: medTop } = niceTicks(maxMedian, 4);
+
+  const x = i => filtered.length === 1 ? m.l + iw/2 : m.l + (i/(filtered.length-1)) * iw;
+  const yWin = v => m.t + ih - ((winTop > 0 ? v / winTop : 0) * ih);
+  const yMed = v => m.t + ih - ((medTop > 0 ? v / medTop : 0) * ih);
+
+  // Grid
+  winTicks.forEach(t => {
+    svg.appendChild(el("line", { class:"grid-line", x1:m.l, x2:m.l+iw, y1:yWin(t), y2:yWin(t) }));
+  });
+
+  // Win rate line
+  const winLine = filtered.map((d, i) => `${i?"L":"M"}${x(i).toFixed(1)} ${yWin(winRates[i]).toFixed(1)}`).join(" ");
+  svg.appendChild(el("path", { d:winLine, fill:"none", stroke:"var(--plays)", "stroke-width":2.5, "stroke-linejoin":"round", "stroke-linecap":"round" }));
+
+  // Median line
+  const medLine = filtered.map((d, i) => `${i?"L":"M"}${x(i).toFixed(1)} ${yMed(medians[i]).toFixed(1)}`).join(" ");
+  svg.appendChild(el("path", { d:medLine, fill:"none", stroke:"var(--solves)", "stroke-width":2.5, "stroke-linejoin":"round", "stroke-linecap":"round", "stroke-dasharray":"4 4" }));
+
+  // Left axis (win rate %)
+  winTicks.forEach(t => {
+    const tx = el("text", { class:"axis-label", x:m.l-8, y:yWin(t)+3, "text-anchor":"end" });
+    tx.textContent = t + "%"; svg.appendChild(tx);
+  });
+
+  // Right axis (median guesses)
+  medTicks.forEach(t => {
+    const tx = el("text", { class:"axis-label", x:m.l+iw+8, y:yMed(t)+3, "text-anchor":"start" });
+    tx.textContent = t.toFixed(1); svg.appendChild(tx);
+  });
+
+  // Date labels
+  filtered.forEach((d, i) => {
+    if (i % 2 === 0 || i === filtered.length - 1) {
+      const lbl = el("text", { class:"axis-label", x:x(i), y:H-m.b+16, "text-anchor":"middle" });
+      lbl.textContent = fmtDay(d.date); svg.appendChild(lbl);
+    }
+  });
+}
+
+// On load, try to fetch fresh data or use fallback. Credentials can come from
+// the server (window._supabase_url/_anon_key, injected by serve-growth-chart.js)
+// or from localStorage (manual entry).
+window.addEventListener("load", () => {
+  const hasCreds = (window._supabase_url && window._anon_key) ||
+    (localStorage.getItem("supabase_url") && localStorage.getItem("anon_key"));
+  if (hasCreds) {
+    fetchFreshData();
+  } else {
+    showDataStatus(false);
+    updateDateRange();  // Initialize with fallback data
+  }
+});
+</script>
+</body>
+</html>
