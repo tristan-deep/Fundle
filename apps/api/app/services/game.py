@@ -24,8 +24,7 @@ from app.services.puzzle_builder import ensure_puzzle_for_date
 TOLERANCE_PCT = 0.02  # within 2% counts as correct
 
 
-def puzzle_number_for_date(puzzle_date: date) -> int:
-    epoch = date(2026, 1, 1)
+def puzzle_number_for_date(puzzle_date: date, epoch: date) -> int:
     return (puzzle_date - epoch).days + 1
 
 
@@ -309,9 +308,11 @@ def session_state(
             unlocked = _unlocked_photo_count(guesses_count, order_len)
             new_photo_urls = photos[prev_unlocked:unlocked]
 
+    epoch = db.scalar(select(func.min(DailyPuzzle.puzzle_date))) or session.puzzle_date
+
     return {
         "puzzle_date": session.puzzle_date,
-        "puzzle_number": puzzle_number_for_date(session.puzzle_date),
+        "puzzle_number": puzzle_number_for_date(session.puzzle_date, epoch),
         "session_id": session.session_id,
         "correct": guess_correct,
         "direction": guess_direction,

@@ -38,6 +38,7 @@ from app.services.hints import (
 )
 
 OUT = ROOT / "apps" / "web" / "lib" / "__fixtures__" / "parity.json"
+PUZZLE_EPOCH = date(2026, 1, 1)
 PUZZLE_DATE = date(2026, 3, 15)
 ANSWER_EUR = 500_000
 SESSION_ID = "test-session"
@@ -147,7 +148,7 @@ def expected_state(sim: dict) -> dict:
 
     return {
         "puzzle_date": PUZZLE_DATE.isoformat(),
-        "puzzle_number": puzzle_number_for_date(PUZZLE_DATE),
+        "puzzle_number": puzzle_number_for_date(PUZZLE_DATE, PUZZLE_EPOCH),
         "session_id": SESSION_ID,
         "correct": sim["last"]["correct"],
         "direction": sim["last"]["direction"],
@@ -175,7 +176,7 @@ def main() -> None:
                 "name": name,
                 "puzzle": {
                     "puzzle_date": PUZZLE_DATE.isoformat(),
-                    "puzzle_number": puzzle_number_for_date(PUZZLE_DATE),
+                    "puzzle_number": puzzle_number_for_date(PUZZLE_DATE, PUZZLE_EPOCH),
                     "payload": PAYLOAD,
                     "answer_eur": ANSWER_EUR,
                 },

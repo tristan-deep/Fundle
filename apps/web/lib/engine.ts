@@ -11,7 +11,6 @@ export const PHOTOS_PER_GUESS = 2;
 export const UNLOCK_PHOTO_SLOTS = PHOTOS_PER_GUESS * MAX_GUESSES;
 export const TOLERANCE_PCT = 0.02; // within 2% counts as correct
 
-const PUZZLE_EPOCH = Date.UTC(2026, 0, 1);
 const MS_PER_DAY = 86_400_000;
 
 // --- Answer obfuscation (shared, reversible) --------------------------------
@@ -34,8 +33,8 @@ function dateToUtcMs(isoDate: string): number {
   return Date.UTC(y, m - 1, d);
 }
 
-export function puzzleNumberForDate(isoDate: string): number {
-  return Math.round((dateToUtcMs(isoDate) - PUZZLE_EPOCH) / MS_PER_DAY) + 1;
+export function puzzleNumberForDate(isoDate: string, epochIsoDate: string): number {
+  return Math.round((dateToUtcMs(isoDate) - dateToUtcMs(epochIsoDate)) / MS_PER_DAY) + 1;
 }
 
 export function amsterdamToday(): string {

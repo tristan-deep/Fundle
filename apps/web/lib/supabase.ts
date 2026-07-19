@@ -49,6 +49,20 @@ export async function fetchTodayPuzzleRow(): Promise<PuzzleRow> {
   return row;
 }
 
+// Day 1 is the earliest puzzle ever published, straight from the table itself
+// rather than a hardcoded guess. `fallback` covers an empty table (nothing
+// published yet) so the caller can still self-bootstrap as #1.
+export async function fetchEarliestPuzzleDate(fallback: string): Promise<string> {
+  const { data, error } = await getClient()
+    .from("daily_puzzles")
+    .select("puzzle_date")
+    .order("puzzle_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { puzzle_date: string } | null)?.puzzle_date ?? fallback;
+}
+
 export async function recordResult(date: string, won: boolean, guesses: number): Promise<void> {
   const { error } = await getClient().rpc("record_result", {
     p_date: date,

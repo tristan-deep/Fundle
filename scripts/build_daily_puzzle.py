@@ -34,11 +34,25 @@ from app.obfuscate import obfuscate  # noqa: E402
 from app.puzzle_date import today_date  # noqa: E402
 from app.services.puzzle_builder import build_live_puzzle  # noqa: E402
 
-PUZZLE_EPOCH = date(2026, 1, 1)
+
+def puzzle_number_for_date(puzzle_date: date, epoch: date) -> int:
+    return (puzzle_date - epoch).days + 1
 
 
-def puzzle_number_for_date(puzzle_date: date) -> int:
-    return (puzzle_date - PUZZLE_EPOCH).days + 1
+def _epoch_date(base_url: str, headers: dict, puzzle_date: date) -> date:
+    """Day 1 is the earliest puzzle ever published, straight from the source of
+    truth (the daily_puzzles table itself) rather than a hardcoded guess. Falls
+    back to `puzzle_date` so the very first published puzzle bootstraps as #1.
+    """
+    resp = httpx.get(
+        f"{base_url}/rest/v1/daily_puzzles",
+        params={"select": "puzzle_date", "order": "puzzle_date.asc", "limit": "1"},
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    rows = resp.json()
+    return date.fromisoformat(rows[0]["puzzle_date"]) if rows else puzzle_date
 
 
 def _require_env() -> tuple[str, str]:
@@ -66,9 +80,10 @@ def _puzzle_exists(base_url: str, headers: dict, puzzle_date: date) -> bool:
 
 def _build_and_upsert(base_url: str, headers: dict, puzzle_date: date) -> None:
     global_id, answer, payload = build_live_puzzle(puzzle_date)
+    epoch = _epoch_date(base_url, headers, puzzle_date)
     row = {
         "puzzle_date": puzzle_date.isoformat(),
-        "puzzle_number": puzzle_number_for_date(puzzle_date),
+        "puzzle_number": puzzle_number_for_date(puzzle_date, epoch),
         "global_id": global_id,
         "answer_token": obfuscate(answer),
         "payload": payload,
