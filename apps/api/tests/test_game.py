@@ -155,8 +155,15 @@ def test_evaluate_guess_zero_answer():
 
 
 def test_puzzle_number_for_date():
-    """Puzzle number increments from epoch."""
+    """Puzzle number increments from the given epoch."""
     epoch = date(2026, 1, 1)
-    assert puzzle_number_for_date(epoch) == 1
-    assert puzzle_number_for_date(date(2026, 1, 2)) == 2
-    assert puzzle_number_for_date(date(2026, 1, 8)) == 8
+    assert puzzle_number_for_date(epoch, epoch) == 1
+    assert puzzle_number_for_date(date(2026, 1, 2), epoch) == 2
+    assert puzzle_number_for_date(date(2026, 1, 8), epoch) == 8
+
+
+def test_puzzle_number_for_date_tracks_actual_launch():
+    """The epoch is whatever day 1 actually was, not a fixed calendar date."""
+    epoch = date(2026, 6, 22)
+    assert puzzle_number_for_date(epoch, epoch) == 1
+    assert puzzle_number_for_date(date(2026, 6, 23), epoch) == 2

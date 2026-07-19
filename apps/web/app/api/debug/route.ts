@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { amsterdamToday, puzzleNumberForDate } from "@/lib/engine";
-import type { PuzzleRow } from "@/lib/supabase";
+import { fetchEarliestPuzzleDate, type PuzzleRow } from "@/lib/supabase";
 
 const exec = promisify(execFile);
 const root = path.join(process.cwd(), "..", "..");
@@ -25,10 +25,13 @@ export async function GET(): Promise<Response> {
     const { stdout } = await exec(python, [script, "--random"], { cwd: root, timeout: 120_000, maxBuffer: 10 * 1024 * 1024 });
     const built = JSON.parse(stdout.trim()) as Pick<PuzzleRow, "global_id" | "answer_token" | "payload">;
     const puzzle_date = amsterdamToday();
+    // Best-effort: this mode intentionally skips Supabase for the listing itself
+    // (see module comment), so fall back to #1 if it's unconfigured/unreachable.
+    const epoch = await fetchEarliestPuzzleDate(puzzle_date).catch(() => puzzle_date);
     return Response.json({
       ...built,
       puzzle_date,
-      puzzle_number: puzzleNumberForDate(puzzle_date),
+      puzzle_number: puzzleNumberForDate(puzzle_date, epoch),
     } satisfies PuzzleRow);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Random puzzle fetch failed";

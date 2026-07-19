@@ -35,10 +35,15 @@ describe("evaluateGuess", () => {
 });
 
 describe("puzzleNumberForDate", () => {
-  it("counts days from the 2026-01-01 epoch", () => {
-    expect(puzzleNumberForDate("2026-01-01")).toBe(1);
-    expect(puzzleNumberForDate("2026-01-02")).toBe(2);
-    expect(puzzleNumberForDate("2026-01-08")).toBe(8);
+  it("counts days since the given epoch", () => {
+    expect(puzzleNumberForDate("2026-01-01", "2026-01-01")).toBe(1);
+    expect(puzzleNumberForDate("2026-01-02", "2026-01-01")).toBe(2);
+    expect(puzzleNumberForDate("2026-01-08", "2026-01-01")).toBe(8);
+  });
+
+  it("tracks the actual launch date, not a fixed calendar epoch", () => {
+    expect(puzzleNumberForDate("2026-06-22", "2026-06-22")).toBe(1);
+    expect(puzzleNumberForDate("2026-06-23", "2026-06-22")).toBe(2);
   });
 });
 

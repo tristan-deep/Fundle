@@ -52,6 +52,16 @@ best-effort and often 15+ minutes late). One-time setup:
    ```
    A `201` from the GitHub API means the dispatch was accepted.
 
+### `0002_fix_puzzle_number_epoch.sql` — realign puzzle numbering
+
+One-time backfill: `puzzle_number` was originally computed from a hardcoded
+`2026-01-01` epoch, so it drifted into looking like "day of the year" instead
+of a Wordle-style count since Fundle's actual launch. Run this once in the SQL
+editor to recompute every existing row's `puzzle_number` from the earliest
+`puzzle_date` already in the table — the real day 1. The builder now derives
+new puzzle numbers the same way (see `scripts/build_daily_puzzle.py`), so this
+migration just realigns history with that logic; nothing further to configure.
+
 ### Notes
 
 - If you fork to a different repo, update the `url` in
