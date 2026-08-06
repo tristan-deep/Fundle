@@ -11,19 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.models import DailyPuzzle, GameSession
-from app.services.funda_url import funda_listing_url
 from app.services.hints import listing_to_payload
 
 logger = logging.getLogger(__name__)
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
-
-# Funda search results only include ~5 thumbnail ids; detail has the full gallery.
-SEARCH_THUMB_PHOTO_LIMIT = 6
 
 
 def _listing_construction_type(listing: Any) -> str | None:
@@ -211,7 +204,19 @@ def _search_candidates(
         filters["min_price"] = min_price
     if max_price is not None:
         filters["max_price"] = max_price
-    results = client.search(**filters)
+    from funda.exceptions import SearchError
+
+    try:
+        results = client.search(**filters)
+    except SearchError as exc:
+        # Funda's Elasticsearch backend intermittently 400s ("all shards
+        # failed"), most often on deep pages. Treat it as an empty page so the
+        # caller retries a different (shallower) page instead of aborting the
+        # whole build.
+        msg = f"⚠️  Funda search failed on page {page}: {exc}"
+        logger.warning(msg)
+        print(msg, file=sys.stderr, flush=True)
+        return []
     return [r for r in results if _is_valid_buy_listing(r)]
 
 
@@ -298,47 +303,6 @@ def fetch_random_listing() -> Any:
         raise RuntimeError("Could not load existing-build listing from search results")
 
 
-def _payload_needs_funda_refresh(payload: dict[str, Any]) -> bool:
-    """True when stored Funda metadata is incomplete or likely stale."""
-    if not payload.get("detail_path"):
-        return True
-    urls = payload.get("photo_urls") or []
-    if not urls:
-        return True
-    stored_count = payload.get("photo_count")
-    if isinstance(stored_count, int) and stored_count > len(urls):
-        return True
-    if len(urls) <= SEARCH_THUMB_PHOTO_LIMIT:
-        return True
-    url = funda_listing_url(payload)
-    path = payload.get("detail_path")
-    if isinstance(path, str) and url and not url.rstrip("/").endswith(path.rstrip("/")):
-        return True
-    tiny = payload.get("tiny_id")
-    if tiny and url:
-        url_id = url.rstrip("/").split("/")[-1]
-        if url_id != str(tiny):
-            return True
-    return False
-
-
-def _enrich_payload_from_funda(payload: dict[str, Any]) -> dict[str, Any]:
-    """Refresh URL, ids, and photos from the live Funda listing API."""
-    listing_id = payload.get("global_id") or payload.get("tiny_id")
-    if not listing_id:
-        return payload
-    try:
-        from funda import Funda
-
-        with Funda() as client:
-            listing = client.listing(listing_id)
-        fresh = listing_to_payload(listing)
-        merged = {**payload, **fresh}
-        return merged
-    except Exception:
-        return payload
-
-
 def build_live_puzzle(puzzle_date: date) -> tuple[int, int, dict]:
     del puzzle_date  # listing selection is random; date is only for storage
     listing = fetch_random_listing()
@@ -346,52 +310,8 @@ def build_live_puzzle(puzzle_date: date) -> tuple[int, int, dict]:
     if amount is None:
         raise RuntimeError("Listing has no price")
     city = listing.city or "Unknown"
-    print(f"\033[92m✓ Puzzle: €{amount:,} ({city})\033[0m", file=sys.stderr, flush=True)
+    # GitHub Actions logs are public; never print the answer there. Locally the
+    # price is handy for debugging.
+    price_str = "€<hidden>" if os.environ.get("GITHUB_ACTIONS") == "true" else f"€{amount:,}"
+    print(f"\033[92m✓ Puzzle: {price_str} ({city})\033[0m", file=sys.stderr, flush=True)
     return listing.global_id or int(listing.id), amount, listing_to_payload(listing)
-
-
-def _clear_sessions_for_date(db: Session, puzzle_date: date) -> None:
-    for row in db.scalars(select(GameSession).where(GameSession.puzzle_date == puzzle_date)):
-        db.delete(row)
-    db.commit()
-
-
-def ensure_puzzle_for_date(
-    db: Session,
-    puzzle_date: date,
-    *,
-    force: bool = False,
-) -> DailyPuzzle:
-    existing = db.get(DailyPuzzle, puzzle_date)
-    if existing and not force:
-        if _payload_needs_funda_refresh(existing.payload):
-            updated = _enrich_payload_from_funda(dict(existing.payload))
-            if funda_listing_url(updated) or updated.get("photo_urls"):
-                existing.payload = updated
-                db.commit()
-                db.refresh(existing)
-        return existing
-
-    if force and existing:
-        _clear_sessions_for_date(db, puzzle_date)
-
-    global_id, answer, payload = build_live_puzzle(puzzle_date)
-
-    if existing:
-        existing.global_id = global_id
-        existing.answer_eur = answer
-        existing.payload = payload
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    row = DailyPuzzle(
-        puzzle_date=puzzle_date,
-        global_id=global_id,
-        answer_eur=answer,
-        payload=payload,
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row

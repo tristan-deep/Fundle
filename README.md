@@ -55,39 +55,40 @@ uv run --project apps/api python scripts/build_daily_puzzle.py --random
 Puzzle day boundaries use **Europe/Amsterdam** (midnight NL time), not UTC. The
 puzzle is published to Supabase, not a local DB.
 
-Build/refresh today's puzzle from Funda (from the project root, with Supabase env set):
+Build/refresh puzzles from Funda (from the project root, with Supabase env set):
 
 ```bash
-uv run --project apps/api python scripts/build_daily_puzzle.py          # today
-uv run --project apps/api python scripts/build_daily_puzzle.py --force   # rebuild
+uv run --project apps/api python scripts/build_daily_puzzle.py           # ensure today + tomorrow
+uv run --project apps/api python scripts/build_daily_puzzle.py --force   # rebuild today
+uv run --project apps/api python scripts/build_daily_puzzle.py --date 2026-07-14 --force
 ```
 
 **Production:** the [`build-puzzle`](.github/workflows/build-puzzle.yml) GitHub
-Action runs daily at Amsterdam midnight (22:00/23:00 UTC depending on DST) and upserts the
-puzzle into Supabase. Trigger it manually from the Actions tab (`workflow_dispatch`)
-to seed/backfill. No server, no cron host needed.
+Action **pre-builds tomorrow's puzzle the evening before** (triggered by a
+Supabase pg_cron job, with a retry slot; a GitHub morning cron is the safety
+net), so the new puzzle goes live at Amsterdam midnight just by already being
+in Supabase. Trigger it manually from the Actions tab (`workflow_dispatch`) to
+seed/backfill. No server, no cron host needed.
 
 ## Project layout
 
 ```
-apps/api/     pyfunda scraping + puzzle builder (+ retained game.py for parity fixtures)
+apps/api/     pyfunda + daily puzzle builder (no server; runs in CI)
 apps/web/     Next.js UI + client-side game engine (lib/engine.ts)
-scripts/      build_daily_puzzle.py (Supabase publish), gen_parity_fixtures.py
+scripts/      build_daily_puzzle.py (Supabase publish)
 supabase/     schema.sql (tables, RLS, stats RPC) — run once in the dashboard
 ```
 
 ## Testing
 
 ```bash
-cd apps/api && uv run pytest && uv run ruff check app tests   # builder + obfuscation + game logic
-cd apps/web && npm test                                       # TS engine + cross-language parity
+cd apps/api && uv run pytest && uv run ruff check app tests   # builder + obfuscation + price buckets
+cd apps/web && npm test                                       # TS engine + golden fixtures
 ```
 
-If you change game logic on either side, regenerate parity fixtures:
-
-```bash
-uv run --project apps/api python scripts/gen_parity_fixtures.py
-```
+Gameplay logic lives only in `apps/web/lib/engine.ts`. Its output is pinned by the
+golden fixtures in `apps/web/lib/__fixtures__/parity.json`; if you deliberately
+change engine behavior, update that file by hand and review the diff.
 
 ## License note
 

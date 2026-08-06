@@ -5,7 +5,7 @@ import { amsterdamToday } from "./engine";
 // ("supabaseUrl is required"). In the browser the public env vars are present.
 let client: SupabaseClient | null = null;
 
-function getClient(): SupabaseClient {
+export function getClient(): SupabaseClient {
   if (client) return client;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -49,11 +49,17 @@ export async function fetchTodayPuzzleRow(): Promise<PuzzleRow> {
   return row;
 }
 
-export async function recordResult(date: string, won: boolean, guesses: number): Promise<void> {
+export async function recordResult(
+  date: string,
+  won: boolean,
+  guesses: number,
+  sessionId: string
+): Promise<void> {
   const { error } = await getClient().rpc("record_result", {
     p_date: date,
     p_won: won,
     p_guesses: guesses,
+    p_session_id: sessionId,
   });
   if (error) throw error;
 }
